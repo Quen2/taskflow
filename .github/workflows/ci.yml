@@ -4,9 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"] 
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:                                     # ← niveau workflow : visible de tous les jobs
   COVERAGE_MIN: 80 
