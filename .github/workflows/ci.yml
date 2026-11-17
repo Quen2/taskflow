@@ -13,7 +13,7 @@ jobs:
     name: api
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:                     // permet de répéter le job ; chaque variante = un check nom (valeur)
+    strategy:                    # permet de répéter le job ; chaque variante = un check nom (valeur)
       fail-fast: false
       matrix:
         node: [20, 22]
@@ -27,6 +27,6 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: api/package-lock.json
-      - run: npm ci                     // permet d'installer les packages sans les update 
-      - run: npm run lint               // run le lint ( normes d'écritures / code )
-      - run: npm run test:coverage      // lance les tests et récupère le coverage aussi
+      - run: npm ci                     # permet d'installer les packages sans les update 
+      - run: npm run lint               # run le lint ( normes d'écritures / code )
+      - run: npm run test:coverage      # lance les tests et récupère le coverage aussi
