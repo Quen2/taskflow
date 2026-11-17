@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:                                     # ← niveau workflow : visible de tous les jobs
+  COVERAGE_MIN: 80 
+
 jobs:
   api:
     name: api
@@ -30,6 +33,33 @@ jobs:
       - run: npm ci                     # permet d'installer les packages sans les update 
       - run: npm run lint               # run le lint ( normes d'écritures / code )
       - run: npm run test:coverage      # lance les tests et récupère le coverage aussi
+      - name: Résumé et seuil de couverture   # ← nouveau step
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+        run: |
+          set -euo pipefail
+          f=coverage/coverage-summary.json
+          pct() { jq -r ".total.$1.pct" "$f"; }
+          lines=$(pct lines)
+
+          {
+            echo "### Couverture de l'API (Node ${NODE_VERSION:-local})"
+            echo
+            echo "| Métrique | Couverture |"
+            echo "|---|---:|"
+            echo "| Lignes | $(pct lines) % |"
+            echo "| Instructions | $(pct statements) % |"
+            echo "| Fonctions | $(pct functions) % |"
+            echo "| Branches | $(pct branches) % |"
+            echo
+            echo "Seuil minimal (lignes) : **${COVERAGE_MIN} %**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if awk -v p="$lines" -v min="$COVERAGE_MIN" 'BEGIN { exit !(p < min) }'; then
+            echo "::error title=Couverture insuffisante::lignes ${lines} % < ${COVERAGE_MIN} % (Node ${NODE_VERSION:-local})"
+            exit 1
+          fi
+          echo "Couverture OK : lignes ${lines} % ≥ ${COVERAGE_MIN} %"
   api-integration:
     name: api-integration
     runs-on: ubuntu-latest
