@@ -1,0 +1,82 @@
+# ============================================================================
+# compose.prod.yaml : environnement de PRODUCTION
+#
+#     IMAGE_TAG=<sha> docker compose -f compose.prod.yaml up -d --wait
+#
+# Lancé depuis ~/taskflow-prod, qui contient le .env, nginx/ et certs/.
+# Différences avec le dev : images du registre (pas de build), secrets
+# obligatoires, un proxy HTTPS seul à publier des ports.
+# ============================================================================
+
+name: taskflow-prod
+
+services:
+  # ---------- Base de données PostgreSQL ------------------------------------
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER manquant dans .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB manquant dans .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------- API Node ------------------------------------------------------
+  api:
+    # Image du registre, identifiée par le SHA du commit : pas de build ici.
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER manquant dans .env}/taskflow-api:${IMAGE_TAG:?IMAGE_TAG manquant (IMAGE_TAG=<sha> docker compose ...)}
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL manquant dans .env}
+      APP_ENV: ${APP_ENV:-production}
+      # APP_VERSION n'est PAS défini ici : il est inscrit dans l'image au build.
+    depends_on:
+      db:
+        condition: service_healthy
+    # HEALTHCHECK défini dans api/Dockerfile.
+    restart: unless-stopped
+
+  # ---------- Front (Nginx) -------------------------------------------------
+  front:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER manquant dans .env}/taskflow-front:${IMAGE_TAG:?IMAGE_TAG manquant}
+    # Pas de "ports:" : le front n'est joignable QUE par le proxy.
+    depends_on:
+      api:
+        condition: service_healthy
+    # HEALTHCHECK défini dans front/Dockerfile.
+    restart: unless-stopped
+
+  # ---------- Reverse proxy HTTPS -------------------------------------------
+  proxy:
+    image: nginx:1.29-alpine
+    # Le SEUL service qui publie des ports : l'unique porte d'entrée.
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/taskflow.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      front:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+# Réseau par défaut avec un nom FIXE, que d'autres projets Compose
+# (monitoring du Jour 4) pourront rejoindre.
+networks:
+  default:
+    name: taskflow-prod
