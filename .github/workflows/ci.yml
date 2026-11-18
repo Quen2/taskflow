@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"] 
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:                                     # ← niveau workflow : visible de tous les jobs
+  COVERAGE_MIN: 80 
+
+jobs:
+  api:
+    name: api
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:                    # permet de répéter le job ; chaque variante = un check nom (valeur)
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci                     # permet d'installer les packages sans les update 
+      - run: npm run lint               # run le lint ( normes d'écritures / code )
+      - run: npm run test:coverage      # lance les tests et récupère le coverage aussi
+      - name: Résumé et seuil de couverture   # ← nouveau step
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+        run: |
+          set -euo pipefail
+          f=coverage/coverage-summary.json
+          pct() { jq -r ".total.$1.pct" "$f"; }
+          lines=$(pct lines)
+
+          {
+            echo "### Couverture de l'API (Node ${NODE_VERSION:-local})"
+            echo
+            echo "| Métrique | Couverture |"
+            echo "|---|---:|"
+            echo "| Lignes | $(pct lines) % |"
+            echo "| Instructions | $(pct statements) % |"
+            echo "| Fonctions | $(pct functions) % |"
+            echo "| Branches | $(pct branches) % |"
+            echo
+            echo "Seuil minimal (lignes) : **${COVERAGE_MIN} %**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if awk -v p="$lines" -v min="$COVERAGE_MIN" 'BEGIN { exit !(p < min) }'; then
+            echo "::error title=Couverture insuffisante::lignes ${lines} % < ${COVERAGE_MIN} % (Node ${NODE_VERSION:-local})"
+            exit 1
+          fi
+          echo "Couverture OK : lignes ${lines} % ≥ ${COVERAGE_MIN} %"
+  api-integration:
+    name: api-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: taskflow
+          POSTGRES_PASSWORD: taskflow      # base jetable de CI, pas un secret
+          POSTGRES_DB: taskflow
+        ports:
+          - 5432:5432                      # les steps tournent sur la VM : on publie le port
+        options: >-
+          --health-cmd "pg_isready -U taskflow -d taskflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:                                   # niveau job : visible de tous les steps
+      DATABASE_URL: postgres://taskflow:taskflow@localhost:5432/taskflow
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+      - run: npm run test:int
+  front:
+    name: front
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: front          # pour les run: seulement
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: front/package-lock.json   # depuis la RACINE
+      - run: npm ci
+      - run: npm run lint
+      - run: npx prettier --check .       # vérifie le formatage, ne modifie rien
+      - run: npm test
+      - run: npm run build                # produit front/dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: front-dist
+          path: front/dist/               # depuis la RACINE : working-directory est ignoré
+          retention-days: 7
+          if-no-files-found: error        # dist/ vide ou absent → le job échoue
