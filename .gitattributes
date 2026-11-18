@@ -1,0 +1,6 @@
+# Les scripts shell et les fichiers de config doivent avoir des fins de ligne Linux (LF),
+# même édités sous Windows : ils sont exécutés par le runner et dans des conteneurs.
+*.sh    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.conf  text eol=lf
