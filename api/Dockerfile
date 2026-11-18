@@ -21,7 +21,15 @@ COPY package.json package-lock.json ./
 
 # `npm ci` : installation stricte d'après le package-lock.json (reproductible).
 # `--omit=dev` : on n'installe pas ESLint, Vitest... inutiles en production.
-RUN npm ci --omit=dev
+# Puis on SUPPRIME les gestionnaires de paquets : l'API démarre avec `node`,
+# elle n'a pas besoin de npm/npx/yarn/corepack à l'exécution. Moins d'outils
+# dans l'image = moins de failles possibles (CVE-2026-59873 était dans le
+# `tar` embarqué par npm, pas dans nos dépendances).
+RUN npm ci --omit=dev \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+              /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+              /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 # Maintenant seulement, on copie le code source (ce qui change souvent).
 COPY src ./src
