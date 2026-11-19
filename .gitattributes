@@ -1,3 +1,5 @@
+# Tous les fichiers texte en LF, sur tous les systèmes (Prettier, scripts, runner Linux).
+* text=auto eol=lf
 # Les scripts shell et les fichiers de config doivent avoir des fins de ligne Linux (LF),
 # même édités sous Windows : ils sont exécutés par le runner et dans des conteneurs.
 *.sh    text eol=lf
