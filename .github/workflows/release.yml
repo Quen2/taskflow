@@ -161,8 +161,8 @@ jobs:
           docker push "$IMAGE:latest"
           echo "Publié : \`$IMAGE:$TAG\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # ---------------------------------------------------------------------------
-  # deploy-staging : sur TON runner, automatiquement.
+  
+  # deploy-staging : sur TON runner, automatiquement, PAR OPENTOFU (infra/).
   # ---------------------------------------------------------------------------
   deploy-staging:
     name: deploy-staging
@@ -175,7 +175,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      packages: read      # docker pull des images privées
+      packages: read      # le provider tire les images privées de ghcr.io
     environment:
       name: staging
       url: http://localhost:8081
@@ -185,32 +185,61 @@ jobs:
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
       FRONT_PORT: ${{ vars.FRONT_PORT || '8081' }}
+      TF_VAR_front_port: ${{ vars.FRONT_PORT || '8081' }}
+      # Le jeton configure le PROVIDER : il n'est pas écrit dans le state.
+      TF_VAR_ghcr_username: ${{ github.actor }}
+      TF_VAR_ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: infra
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Copier le code de déploiement dans le dossier staging
+      - name: Init (state du staging, lock file en lecture seule)
+        run: tofu init -input=false -lockfile=readonly -backend-config="path=$STAGING_DIR/terraform.tfstate"
+
+      - name: Variables OpenTofu (version à déployer)
+        run: ./ci-env.sh "$TAG"
+
+      - name: Migration Compose -> OpenTofu (sans effet après le premier passage)
         run: |
-          test -f "$STAGING_DIR/.env" || { echo "::error::$STAGING_DIR/.env absent (étape B.1)."; exit 1; }
-          cp compose.staging.yaml deploy/deploy.sh deploy/smoke-test.sh deploy/backup.sh "$STAGING_DIR/"
+          echo "Conteneurs Compose du staging à supprimer (le volume est conservé) :"
+          docker ps -aq --filter label=com.docker.compose.project=taskflow-staging \
+            | xargs -r docker rm -f
+          if docker network inspect taskflow-staging --format '{{ index .Labels "com.docker.compose.project" }}' 2>/dev/null \
+             | grep -qx taskflow-staging; then
+            echo "Suppression du réseau Compose du staging."
+            docker network rm taskflow-staging
+          fi
+          if ! tofu state list | grep -qx docker_volume.pgdata; then
+            if docker volume inspect taskflow-staging-pgdata > /dev/null 2>&1; then
+              echo "Import du volume existant dans le state."
+              tofu import -input=false -lock-timeout=120s docker_volume.pgdata taskflow-staging-pgdata
+            fi
+          fi
+          echo "Migration : rien (ou plus rien) à faire."
 
-      - name: Connexion à ghcr.io
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTEUR: ${{ github.actor }}
-        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTEUR" --password-stdin
+      - name: Plan
+        run: tofu plan -input=false -lock-timeout=120s -out=tfplan
 
-      - name: Déployer
-        run: cd "$STAGING_DIR" && ./deploy.sh "$TAG"
+      - name: Apply (exactement le plan affiché)
+        run: tofu apply -input=false -lock-timeout=120s tfplan
+
+      - name: Mémoriser la version déployée
+        run: |
+          if [ -s "$STAGING_DIR/.deployed_tag" ] && [ "$(cat "$STAGING_DIR/.deployed_tag")" != "$TAG" ]; then
+            cp "$STAGING_DIR/.deployed_tag" "$STAGING_DIR/.previous_tag"
+          fi
+          echo "$TAG" > "$STAGING_DIR/.deployed_tag"
 
       - name: Smoke test (avec la version attendue)
-        run: |
-          "$STAGING_DIR/smoke-test.sh" "http://host.docker.internal:$FRONT_PORT/health" "$TAG"
+        run: ../deploy/smoke-test.sh "http://host.docker.internal:$FRONT_PORT/health" "$TAG"
 
-      - name: Déconnexion de ghcr.io (le runner est persistant)
+      - name: Nettoyage (le plan contient des valeurs sensibles)
         if: always()
-        run: docker logout ghcr.io
+        run: rm -f tfplan
 
   # ---------------------------------------------------------------------------
   # deploy-production : sur TON runner, APRÈS approbation (environment).

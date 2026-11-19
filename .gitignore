@@ -24,3 +24,11 @@ backups/
 *.pem
 *.key
 *.crt
+
+# OpenTofu : providers téléchargés, state (secrets !), plans, variables locales
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+terraform.tfvars
