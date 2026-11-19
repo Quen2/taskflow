@@ -6,7 +6,7 @@
 # Écrit dans $GITHUB_ENV : les steps suivants du job voient ces variables.
 set -euo pipefail
 
-: "${STAGING_DIR:?STAGING_DIR absent : c'est une variable du conteneur runner}"
+: "${STAGING_DIR:?STAGING_DIR absent (variable du conteneur runner)}"
 : "${GITHUB_ENV:?à lancer dans un job GitHub Actions}"
 
 owner="${GITHUB_REPOSITORY_OWNER,,}"      # ghcr.io exige des minuscules
