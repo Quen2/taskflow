@@ -1,0 +1,4 @@
+# Règles ZAP : chaque IGNORE est un faux positif JUSTIFIÉ (voir docs/SECURITE.md).
+10049	IGNORE	(Storable and Cacheable Content : les fichiers /assets/ ont un nom haché, ils doivent être mis en cache)
+10109	IGNORE	(Modern Web Application : simple information, le site est une application JavaScript)
+90004	IGNORE	(Cross-Origin-Embedder-Policy : isolation non nécessaire ici, à réexaminer au 2027-05-20)
