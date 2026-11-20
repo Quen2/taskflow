@@ -1,0 +1,10 @@
+# Grafana charge au démarrage les tableaux de bord JSON de ce dossier.
+apiVersion: 1
+providers:
+  - name: taskflow
+    folder: TaskFlow
+    type: file
+    disableDeletion: true    # impossible de le supprimer depuis l'interface
+    allowUiUpdates: false    # la vérité est dans Git, pas dans l'interface
+    options:
+      path: /var/lib/grafana/dashboards

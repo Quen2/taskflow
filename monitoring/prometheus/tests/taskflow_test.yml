@@ -1,0 +1,32 @@
+# Test unitaire des règles : promtool simule des séries et vérifie les alertes.
+# Lancement : promtool test rules /etc/prometheus/tests/taskflow_test.yml
+rule_files:
+  - ../rules/taskflow.yml
+
+evaluation_interval: 15s
+
+tests:
+  - interval: 15s
+    input_series:
+      # Sonde OK de 0 à 45 s (4 mesures), puis en ÉCHEC à partir de 60 s.
+      - series: 'probe_success{job="blackbox-health", instance="http://front/health"}'
+        values: "1 1 1 1 0x12"
+
+    alert_rule_test:
+      # À 90 s : 30 s d'échec, moins que "for: 1m" -> pending, donc rien n'est envoyé.
+      - eval_time: 90s
+        alertname: TaskFlowApiDown
+        exp_alerts: []
+
+      # À 150 s : 1 min 30 d'échec -> firing.
+      - eval_time: 150s
+        alertname: TaskFlowApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-health
+              instance: http://front/health
+            exp_annotations:
+              summary: "API TaskFlow injoignable"
+              description: "La sonde http://front/health échoue depuis plus d'une minute."
+              runbook_url: "https://github.com/Quen2/taskflow/blob/main/docs/INCIDENTS.md#runbook-taskflowapidown"

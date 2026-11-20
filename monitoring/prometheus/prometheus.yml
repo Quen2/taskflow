@@ -1,0 +1,50 @@
+# Configuration de Prometheus : quoi collecter, à quel rythme, où envoyer les alertes.
+global:
+  scrape_interval: 15s       # une collecte toutes les 15 s
+  evaluation_interval: 15s   # les règles sont évaluées toutes les 15 s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Prometheus se surveille lui-même.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # BOÎTE BLANCHE : l'API raconte ce qui se passe à l'intérieur (/metrics).
+  - job_name: taskflow-api
+    static_configs:
+      - targets: ["api:3000"]
+        labels:
+          env: prod
+
+  # BOÎTE NOIRE : on teste /health À TRAVERS LE FRONT, comme un utilisateur.
+  - job_name: blackbox-health
+    metrics_path: /probe
+    params:
+      module: [http_health]
+    static_configs:
+      - targets: ["http://front/health"]
+        labels:
+          env: prod
+    relabel_configs:
+      # 1. L'adresse à tester devient le paramètre ?target=...
+      - source_labels: [__address__]
+        target_label: __param_target
+      # 2. Le label "instance" garde l'adresse testée (lisible dans les graphiques).
+      - source_labels: [__param_target]
+        target_label: instance
+      # 3. La requête part en réalité vers le blackbox exporter.
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Le blackbox exporter lui-même : est-il vivant ?
+  - job_name: blackbox
+    static_configs:
+      - targets: ["blackbox:9115"]
