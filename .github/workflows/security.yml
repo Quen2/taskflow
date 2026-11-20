@@ -1,0 +1,133 @@
+# =============================================================================
+# security.yml : contrôles de sécurité à chaque PR, sur main, et chaque semaine
+#   secrets      gitleaks sur TOUT l'historique
+#   dependances  npm audit (SCA) pour api et front
+#   sast         Semgrep : le code source, sans l'exécuter
+#   dast         ZAP baseline : l'application qui tourne, attaquée de l'extérieur
+# Tout tourne chez GitHub, jamais sur le runner du lab (le DAST exécute le code de la PR).
+# =============================================================================
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 1"     # lundi 5h23 UTC : de nouvelles CVE sont publiées sans que le code change
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0             # TOUT l'historique, pas seulement le dernier commit
+          persist-credentials: false
+
+      - name: Installer gitleaks (somme SHA-256 vérifiée)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${archive}\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+
+      - name: Scanner l'historique
+        run: ./gitleaks git . --redact --verbose
+
+  # ---------------------------------------------------------------------------
+  dependances:
+    name: dependances (${{ matrix.dossier }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        dossier: [api, front]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dossier }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rapport complet (pour le triage)
+        run: npm audit --json > npm-audit.json || true
+
+      - name: Échec sur high ou critical
+        run: npm audit --audit-level=high
+
+      - name: Publier le rapport
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@<SHA_UPLOAD_ARTIFACT> # <VERSION>
+        with:
+          name: npm-audit-${{ matrix.dossier }}
+          path: ${{ matrix.dossier }}/npm-audit.json
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Semgrep (règles publiques, sans compte, sans télémétrie)
+        run: |
+          docker run --rm -v "$PWD":/src:ro -w /src docker.io/semgrep/semgrep:1.184.0 \
+            semgrep scan --config p/javascript --config p/nodejsscan --metrics=off --error
+
+  # ---------------------------------------------------------------------------
+  dast:
+    name: dast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Démarrer la stack (db, api, front)
+        run: docker compose up -d --build --wait
+
+      - name: Vérifier /health
+        run: curl -fsS http://localhost:8080/health
+
+      - name: ZAP baseline (scan passif)
+        run: |
+          mkdir -p zap
+          cp .zap/rules.tsv zap/
+          chmod -R a+rwx zap                 # ZAP tourne en uid 1000 dans son conteneur
+          docker run --rm --network host -v "$PWD/zap":/zap/wrk:rw \
+            ghcr.io/zaproxy/zaproxy:2.17.0 \
+            zap-baseline.py -t http://localhost:8080 -c rules.tsv -r rapport.html -J rapport.json
+
+      - name: Logs de la stack (si échec)
+        if: failure()
+        run: docker compose logs
+
+      - name: Publier le rapport ZAP
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@<SHA_UPLOAD_ARTIFACT> # <VERSION>
+        with:
+          name: zap-rapport
+          path: zap/rapport.*
+          retention-days: 14
+
+      - name: Arrêter la stack
+        if: always()
+        run: docker compose down -v
