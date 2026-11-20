@@ -70,7 +70,7 @@ jobs:
 
       - name: Publier le rapport
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@<SHA_UPLOAD_ARTIFACT> # <VERSION>
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-audit-${{ matrix.dossier }}
           path: ${{ matrix.dossier }}/npm-audit.json
@@ -122,7 +122,7 @@ jobs:
 
       - name: Publier le rapport ZAP
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@<SHA_UPLOAD_ARTIFACT> # <VERSION>
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zap-rapport
           path: zap/rapport.*
