@@ -1,0 +1,10 @@
+# Source de données de Grafana : Prometheus, sur le réseau du projet de supervision.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus          # référencé par le tableau de bord : ne pas changer
+    type: prometheus
+    access: proxy            # c'est le serveur Grafana qui interroge Prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

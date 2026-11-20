@@ -1,0 +1,38 @@
+# Alertmanager : QUI prévenir, COMMENT, et QUAND. Les alertes viennent de Prometheus.
+global:
+  # Mailpit : faux serveur SMTP du lab (les mails s'affichent sur http://localhost:8025).
+  smtp_smarthost: mailpit:1025
+  smtp_from: alertmanager@taskflow.local
+  smtp_require_tls: false
+
+# ROUTAGE : un arbre. Chaque alerte descend jusqu'à la première route qui correspond.
+route:
+  receiver: mail-equipe          # par défaut
+  # REGROUPEMENT : un seul mail pour toutes les alertes de même nom et même env.
+  group_by: [alertname, env]
+  group_wait: 30s                # attendre 30 s les alertes "sœurs" avant le 1er envoi
+  group_interval: 5m             # délai avant de signaler un changement dans le groupe
+  repeat_interval: 4h            # relance si l'alerte dure toujours
+  routes:
+    # Le Watchdog ne doit JAMAIS envoyer de mail : il va vers un receveur vide.
+    - matchers: ['severity="none"']
+      receiver: "null"
+    # Une panne critique : on prévient plus vite, et on relance plus souvent.
+    - matchers: ['severity="critical"']
+      receiver: mail-equipe
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  - name: "null"                 # aucune notification
+  - name: mail-equipe
+    email_configs:
+      - to: equipe@taskflow.local
+        send_resolved: true      # envoyer aussi un mail [RESOLVED] quand c'est réparé
+
+# INHIBITION : si l'API est en panne (critical), inutile d'envoyer en plus les
+# alertes "warning" du même environnement : elles n'en sont que des conséquences.
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: [env]

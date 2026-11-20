@@ -1,0 +1,80 @@
+# ============================================================================
+# compose.monitoring.yaml : supervision de la production TaskFlow
+#
+#     export GF_SECURITY_ADMIN_PASSWORD=...      (jamais dans Git)
+#     docker compose -f compose.monitoring.yaml up -d
+#
+# Prometheus et blackbox rejoignent le réseau EXTERNE "taskflow-prod" (créé par
+# compose.prod.yaml) pour joindre api:3000 et front. Tous les ports sont publiés
+# sur 127.0.0.1 : la supervision n'est accessible que depuis ce poste.
+# ============================================================================
+
+name: taskflow-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle          # rechargement à chaud : POST /-/reload
+    volumes:
+      - ./prometheus:/etc/prometheus:ro # config, règles et tests (lecture seule)
+      - prometheus-data:/prometheus     # les séries temporelles
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [default, taskflow]
+    restart: unless-stopped
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.27.0
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./blackbox:/etc/blackbox:ro
+    networks: [default, taskflow]
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager # silences, alertes déjà notifiées
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    # SMTP sur 1025 (réseau interne), interface web sur 8025.
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?exportez GF_SECURITY_ADMIN_PASSWORD}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/taskflow.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+
+networks:
+  # Le réseau de la prod : il existe déjà, Compose ne doit ni le créer ni le supprimer.
+  taskflow:
+    name: taskflow-prod
+    external: true

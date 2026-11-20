@@ -1,0 +1,13 @@
+# Modules du blackbox exporter : COMMENT tester une cible.
+modules:
+  http_health:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      # /health doit répondre 200...
+      valid_status_codes: [200]
+      # ...ET dire que tout va bien (une page d'erreur en 200 ne suffit pas).
+      fail_if_body_not_matches_regexp:
+        - '"status":"ok"'
